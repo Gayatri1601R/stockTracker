@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-
+from urllib.parse import quote_plus
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Optional
@@ -28,12 +28,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-before-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
+def build_mongo_url(raw_url: str | None) -> str:
+    if not raw_url:
+        return "mongodb://localhost:27017"
+
+    # If already encoded, return directly
+    if "%40" in raw_url:
+        return raw_url
+
+    try:
+        prefix = "mongodb+srv://"
+        if raw_url.startswith(prefix):
+            creds, rest = raw_url.replace(prefix, "").split("@", 1)
+            username, password = creds.split(":", 1)
+
+            username = quote_plus(username)
+            password = quote_plus(password)
+
+            return f"{prefix}{username}:{password}@{rest}"
+    except Exception:
+        pass
+
+    return raw_url
+
+
+RAW_MONGO_URL = os.getenv("MONGO_URL")
+MONGO_URL = build_mongo_url(RAW_MONGO_URL)
+
+# Debug (safe)
+if MONGO_URL and "@" in MONGO_URL:
+    hidden = MONGO_URL.split("@")[0].split(":")[-1]
+    print("Mongo URL:", MONGO_URL.replace(hidden, "****"))
+
+# Connect
 client = pymongo.MongoClient(MONGO_URL)
+
+# Force connection check
+try:
+    client.admin.command("ping")
+    print("✅ MongoDB connected")
+except Exception as e:
+    print("❌ MongoDB connection failed:", e)
+    raise e
+
 db = client["stock_tracker"]
 
 users_col = db["users"]
